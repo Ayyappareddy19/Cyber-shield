@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cyber Shield Consultancy - Defense Against Digital Threats</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Inter font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        /* Custom styles for the cyber theme - NEW GOLD/BLACK THEME */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0a0a0a; /* Deep black background */
+            color: #f5f5f5; /* Brighter text for high contrast */
+        }
+        .text-cyber-gold {
+            color: #ffd700; /* Bright, premium gold accent */
+        }
+        .bg-cyber-gold {
+            background-color: #ffd700;
+        }
+        .border-cyber-gold {
+            border-color: #ffd700;
+        }
+        .btn-primary {
+            transition: all 0.3s ease;
+            box-shadow: 0 0 15px rgba(255, 215, 0, 0.4); /* Gold shadow */
+        }
+        .btn-primary:hover {
+            box-shadow: 0 0 25px rgba(255, 215, 0, 0.8); /* Brighter gold shadow */
+            transform: translateY(-2px);
+        }
+        .feature-card {
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(255, 215, 0, 0.2); /* Soft gold shadow */
+        }
+        /* Custom scrollbar for a sleek look */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #161b22;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #ffd700; /* Gold scrollbar thumb */
+            border-radius: 4px;
+        }
+    </style>
+
+    <!-- Firebase SDK Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, addDoc, collection, onSnapshot, query, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // IMPORTANT: Set debug level for logs
+        setLogLevel('Debug');
+
+        // Global variables provided by the Canvas environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db, auth, userId = null;
+
+        // Function to safely initialize Firebase
+        const initFirebase = async () => {
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                window.db = db; // Make DB globally accessible for the app logic
+
+                // Sign in logic
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                // Auth state listener
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log("Firebase Auth Ready. User ID:", userId);
+                        window.userId = userId; // Make userId globally accessible
+                        
+                        // Once authenticated, start loading dynamic data
+                        loadSectorMetrics(db, appId, userId);
+                        loadAppointmentRequests(db, appId, userId);
+                        // Trigger render, which will now safely update the user ID display.
+                        if (window.renderApp) {
+                            window.renderApp(); 
+                        } else {
+                            console.error("window.renderApp not yet defined when auth state changed.");
+                        }
+                    } else {
+                        // This fallback should rarely occur in the Canvas environment
+                        console.error("User not authenticated.");
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase initialization or authentication failed:", error);
+            }
+        };
+
+        // --- Firestore Data Handlers ---
+
+        const loadSectorMetrics = (db, appId, currentUserId) => {
+            const path = `/artifacts/${appId}/users/${currentUserId}/sector_metrics`;
+            const q = query(collection(db, path));
+
+            // Set up a listener for real-time updates
+            onSnapshot(q, (snapshot) => {
+                let metrics = [];
+                snapshot.forEach((doc) => {
+                    metrics.push(doc.data());
+                });
+
+                // Simple in-memory sorting
+                metrics.sort((a, b) => b.casesSolved - a.casesSolved);
+
+                // Update the global app state/data structure
+                window.globalState.sectorMetrics = metrics;
+                if (window.renderApp) window.renderApp(); // Trigger UI update
+                console.log("Sector Metrics Loaded:", metrics);
+
+                // If metrics are empty, seed some data for demonstration
+                if (metrics.length === 0) {
+                    seedInitialMetrics(db, path);
+                }
+            }, (error) => {
+                console.error("Error fetching sector metrics:", error);
+            });
+        };
+
+        const seedInitialMetrics = async (db, path) => {
+             const mockMetrics = [
+                { sector: 'Financial Services', casesSolved: 285, riskReduction: '45%' },
+                { sector: 'Healthcare & Pharma', casesSolved: 192, riskReduction: '52%' },
+                { sector: 'E-commerce & Retail', casesSolved: 310, riskReduction: '38%' },
+                { sector: 'Tech Startups', casesSolved: 145, riskReduction: '61%' },
+            ];
+
+            console.log("Seeding initial sector metrics...");
+            for (const metric of mockMetrics) {
+                try {
+                    // Use a unique ID for each metric document
+                    await setDoc(doc(db, path, metric.sector.replace(/\s/g, '_')), metric);
+                } catch (e) {
+                    console.error("Error seeding document:", e);
+                }
+            }
+        };
+
+        const loadAppointmentRequests = (db, appId, currentUserId) => {
+            const path = `/artifacts/${appId}/users/${currentUserId}/appointment_requests`;
+            const q = query(collection(db, path));
+
+            onSnapshot(q, (snapshot) => {
+                const totalRequests = snapshot.size;
+                // Update the total cases solved metric with total appointments
+                // This is a creative way to show live user-specific activity metrics.
+                const totalSolved = window.globalState.totalCasesSolved;
+                const newTotal = totalSolved + totalRequests;
+
+                // Update the global state
+                window.globalState.totalCasesSolved = newTotal;
+                window.globalState.recentAppointments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                if (window.renderApp) window.renderApp();
+                console.log("Total appointments/requests tracked:", totalRequests);
+            }, (error) => {
+                console.error("Error loading appointment requests:", error);
+            });
+        };
+
+        // Initialize Firebase on window load
+        window.addEventListener('load', initFirebase);
+
+    </script>
+
+    <!-- Main Application JavaScript Logic -->
+    <script>
+        // Global state management
+        window.globalState = {
+            view: 'main', // 'main', 'details', 'booking'
+            selectedFeature: null,
+            totalCasesSolved: 750, // Initial mock number
+            sectorMetrics: [], // Populated by Firestore listener
+            recentAppointments: [], // Populated by Firestore listener
+            message: { text: '', type: '' } // 'success' or 'error'
+        };
+
+        const FEATURES_DATA = [
+            {
+                id: 'threat_intel',
+                title: 'Real-Time Threat Intelligence',
+                icon: 'M13 10V3L4 14h7v7l9-11h-7z', // Thunderbolt/Lightning
+                shortDesc: 'Identify and neutralize threats before they impact your operations using global feeds and AI.',
+                longDesc: 'Our engine continuously aggregates data from dark web monitors, malware repositories, and industry reports. We process billions of data points daily to deliver predictive insights, allowing your team to patch vulnerabilities and adjust defenses proactively, not reactively. This service uses advanced techniques like deep packet inspection and behavioral analysis to spot zero-day exploits.',
+                imageQuery: 'abstract network security concept'
+            },
+            {
+                id: 'vulnerability_scan',
+                title: 'Proactive Vulnerability Scanning',
+                // UPDATED: Changed from Shield to Magnifying Glass/Search icon
+                icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z', 
+                shortDesc: 'Regular, comprehensive scans of your infrastructure, applications, and cloud environments.',
+                longDesc: 'We perform authenticated and unauthenticated scans covering OWASP Top 10 risks, misconfigurations, and outdated software across public-facing assets and internal networks. Reports are prioritized by CVSS score and accompanied by actionable remediation plans, integrated directly into your existing ticket system. This ensures a fast and efficient path to compliance and security hardening.',
+                imageQuery: 'data protection and encryption'
+            },
+            {
+                id: 'compliance_audit',
+                title: 'Regulatory Compliance Audit',
+                icon: 'M18 10h-2V6a4 4 0 00-8 0v4H6a2 2 0 00-2 2v8c0 1.1.9 2 2 2h12a2 2 0 002-2v-8a2 2 0 00-2-2zM10 6a2 2 0 014 0v4h-4V6z', // Lock
+                shortDesc: 'Ensure adherence to industry standards like GDPR, HIPAA, and ISO 27001 with expert guidance.',
+                longDesc: 'Our certified auditors conduct gap analyses, policy reviews, and technical controls testing to ensure full compliance. We provide documentation, staff training, and continuous monitoring required to pass external audits successfully. Staying compliant is not just a legal requirement, it’s a commitment to your clients’ data privacy and trust. We handle the complexity so you can focus on growth.',
+                imageQuery: 'business data compliance icons'
+            },
+        ];
+
+        // --- View Rendering Functions ---
+
+        // EXPLICITLY assign to window to fix the "window.renderApp is not a function" error
+        window.renderApp = () => {
+            const appContainer = document.getElementById('app-container');
+            if (!appContainer) return;
+
+            // Clear previous content
+            appContainer.innerHTML = '';
+
+            let contentHTML = '';
+
+            switch (window.globalState.view) {
+                case 'booking':
+                    contentHTML = renderBookingForm();
+                    break;
+                case 'details':
+                    contentHTML = renderDetailsView();
+                    break;
+                case 'main':
+                default:
+                    contentHTML = renderMainView();
+                    break;
+            }
+
+            appContainer.innerHTML = contentHTML;
+
+            // Re-attach event listeners after rendering
+            if (window.globalState.view === 'main') {
+                attachFeatureCardListeners();
+                attachBookingButtonListener();
+                // Safely update user ID display after element is rendered
+                const userIdDisplay = document.getElementById('user-id-display');
+                if (userIdDisplay && window.userId) {
+                    userIdDisplay.textContent = window.userId;
+                }
+            } else if (window.globalState.view === 'booking') {
+                attachFormSubmitListener();
+            }
+            // Attach Back button listener universally
+            document.querySelectorAll('.btn-back').forEach(btn => {
+                btn.onclick = () => setView('main');
+            });
+
+            // Handle Message Display
+            const messageElement = document.getElementById('app-message');
+            if (window.globalState.message.text && messageElement) {
+                messageElement.classList.remove('hidden');
+                messageElement.innerHTML = `
+                    <div class="p-4 rounded-lg shadow-lg ${window.globalState.message.type === 'success' ? 'bg-green-700/50 border border-green-500' : 'bg-red-700/50 border border-red-500'}">
+                        ${window.globalState.message.text}
+                    </div>
+                `;
+                setTimeout(() => {
+                    window.globalState.message = { text: '', type: '' };
+                    window.renderApp();
+                }, 5000);
+            } else if (messageElement) {
+                 messageElement.classList.add('hidden');
+            }
+        };
+
+        const setView = (viewName, featureId = null) => {
+            window.globalState.view = viewName;
+            window.globalState.selectedFeature = featureId ? FEATURES_DATA.find(f => f.id === featureId) : null;
+            window.globalState.message = { text: '', type: '' }; // Clear messages on view change
+            window.renderApp();
+        };
+
+        const renderIcon = (d, size = 'w-6 h-6') => `
+            <svg class="${size} text-cyber-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${d}"></path>
+            </svg>
+        `;
+        
+        // NEW FUNCTION: Generates a placeholder image URL
+        const createPlaceholderImage = (query) => {
+            const encodedQuery = encodeURIComponent(query.replace(/\s/g, '+'));
+            // bg: #1e293b (dark gray/blue) | text color: #ffd700 (cyber gold)
+            return `https://placehold.co/800x400/1e293b/ffd700?text=CYBER+SHIELD+%7C+${encodedQuery.toUpperCase()}`;
+        };
+
+        // --- Main View Renderer (Hero, Metrics, Features) ---
+        const renderMainView = () => {
+            const { totalCasesSolved, sectorMetrics } = window.globalState;
+
+            // 1. Metrics Section (Bar Chart & Stats)
+            const maxCases = Math.max(...sectorMetrics.map(m => m.casesSolved), 1); // Get max for bar height scaling
+            const metricsHTML = sectorMetrics.map(metric => `
+                <div class="flex flex-col items-center">
+                    <div class="h-24 w-full flex items-end justify-center px-1">
+                        <div class="bg-cyber-gold w-full rounded-t-lg transition-all duration-700 ease-out"
+                             style="height: ${(metric.casesSolved / maxCases) * 100}%"
+                             title="${metric.casesSolved} cases solved">
+                        </div>
+                    </div>
+                    <p class="mt-2 text-sm text-center font-medium">${metric.sector}</p>
+                    <p class="text-xs text-gray-400">RR: ${metric.riskReduction}</p>
+                </div>
+            `).join('');
+
+            // 2. Features Grid
+            const featuresHTML = FEATURES_DATA.map(feature => `
+                <div data-feature-id="${feature.id}" class="feature-card cursor-pointer p-6 bg-[#161b22] rounded-xl border border-gray-700 hover:border-cyber-gold/70">
+                    <div class="flex items-center space-x-4">
+                        ${renderIcon(feature.icon, 'w-8 h-8')}
+                        <h3 class="text-xl font-semibold text-white">${feature.title}</h3>
+                    </div>
+                    <p class="mt-4 text-gray-400">${feature.shortDesc}</p>
+                    <button class="mt-4 text-sm font-semibold text-cyber-gold hover:text-white transition duration-200">
+                        Learn More &rarr;
+                    </button>
+                </div>
+            `).join('');
+
+            return `
+                <header class="bg-[#161b22] sticky top-0 z-10 shadow-lg shadow-[#ffd700]/10 p-4">
+                    <div class="max-w-7xl mx-auto flex justify-between items-center">
+                        <h1 class="text-2xl font-extrabold text-cyber-gold flex items-center">
+                            ${renderIcon('M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z', 'w-6 h-6')}
+                            <span class="ml-2">Cyber Shield</span>
+                        </h1>
+                        <button id="book-assessment-btn-header" class="btn-primary px-5 py-2 bg-cyber-gold text-gray-900 font-bold rounded-full">
+                            Book Free Assessment
+                        </button>
+                    </div>
+                </header>
+
+                <main class="max-w-7xl mx-auto p-4 md:p-8">
+
+                    <!-- Hero Section -->
+                    <section class="hero text-center py-20 bg-gray-900/20 rounded-xl mb-12 border-b-2 border-cyber-gold/50">
+                        <h2 class="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight text-white">
+                            <span class="text-cyber-gold">Defend</span> Your Digital Fortress.
+                        </h2>
+                        <p class="mt-4 text-lg text-gray-400 max-w-3xl mx-auto">
+                            We provide real-time, AI-powered cybersecurity consultancy and managed SOC services. Protect your assets, detect breaches, and maintain compliance without the in-house cost.
+                        </p>
+                        <button id="book-assessment-btn-hero" class="btn-primary mt-8 px-8 py-3 bg-cyber-gold text-gray-900 font-extrabold rounded-full text-lg">
+                            Get Started - Book a Demo Today
+                        </button>
+                    </section>
+
+                    <!-- Case Solved/Metrics Section -->
+                    <section class="mb-12">
+                        <h2 class="text-3xl font-bold text-center mb-10 text-white">Our Impact: Proven Defense Metrics</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-8 text-center">
+                            <div class="p-6 bg-[#161b22] rounded-xl border-l-4 border-cyber-gold shadow-xl">
+                                <p class="text-5xl font-extrabold text-cyber-gold">${totalCasesSolved}+</p>
+                                <p class="mt-2 text-gray-400">Total Cases Solved</p>
+                                <p class="text-xs text-gray-500">Includes system vulnerabilities and active attacks</p>
+                            </div>
+                            <div class="p-6 bg-[#161b22] rounded-xl border-l-4 border-gray-500 shadow-xl">
+                                <p class="text-5xl font-extrabold text-white">400ms</p>
+                                <p class="mt-2 text-gray-400">Average Detection Time</p>
+                                <p class="text-xs text-gray-500">Time from exploit to alert (Zero-trust verified)</p>
+                            </div>
+                            <div class="p-6 bg-[#161b22] rounded-xl border-l-4 border-cyber-gold shadow-xl">
+                                <p class="text-5xl font-extrabold text-cyber-gold">99.9%</p>
+                                <p class="mt-2 text-gray-400">Uptime & Coverage</p>
+                                <p class="text-xs text-gray-500">Guaranteed service availability</p>
+                            </div>
+                        </div>
+
+                        <!-- Sector Solved Cases -->
+                        <div class="mt-12 p-8 bg-[#161b22] rounded-xl border border-gray-700">
+                            <h3 class="text-2xl font-bold text-white mb-6">Cases Solved by Sector</h3>
+                            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                                ${metricsHTML}
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Features/Services Section -->
+                    <section class="py-12">
+                        <h2 class="text-3xl font-bold text-center mb-10 text-white">Core Cyber Shield Services</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                            ${featuresHTML}
+                        </div>
+                    </section>
+                </main>
+
+                <!-- Footer -->
+                <footer class="bg-[#161b22] p-8 mt-12 border-t border-cyber-gold/20">
+                    <div class="max-w-7xl mx-auto text-center">
+                        <p class="text-lg font-semibold text-white">Ready to secure your future?</p>
+                        <p class="text-sm text-gray-400 mt-2">Get in touch to discuss a customized security strategy.</p>
+                        <div class="mt-4 space-y-2">
+                            <p>📞 +91 98765 43210</p>
+                            <p>✉️ <a href="mailto:contact@cybershieldconsultancy.com" class="text-cyber-gold hover:underline">contact@cybershieldconsultancy.com</a></p>
+                            <p class="text-xs text-gray-500 pt-4">User ID (for data storage): <span id="user-id-display" class="font-mono text-gray-300">Loading...</span></p>
+                        </div>
+                        <p class="mt-6 text-xs text-gray-500">© 2025 Cyber Shield Consultancy. All rights reserved.</p>
+                    </div>
+                </footer>
+            `;
+        };
+
+        // --- Details View Renderer (Dynamic Content) ---
+        const renderDetailsView = () => {
+            const feature = window.globalState.selectedFeature;
+            if (!feature) return window.renderMainView();
+
+            // Use the new function to generate the image URL
+            const imageUrl = createPlaceholderImage(feature.imageQuery);
+
+            return `
+                <div class="max-w-5xl mx-auto p-4 md:p-10">
+                    <button class="btn-back flex items-center text-cyber-gold hover:text-white transition duration-200 mb-8 font-semibold">
+                        ${renderIcon('M10 19l-7-7m0 0l7-7m-7 7h18', 'w-5 h-5 mr-2')}
+                        Back to Services
+                    </button>
+
+                    <div class="bg-[#161b22] p-8 rounded-xl border border-gray-700 shadow-2xl">
+                        <h2 class="text-4xl font-extrabold text-cyber-gold mb-4">${feature.title}</h2>
+                        <div class="text-gray-400 mb-8">${renderIcon(feature.icon, 'w-10 h-10')}</div>
+
+                        <!-- Visual/Context Image Placeholder -->
+                        <div class="mb-8">
+                             <img src="${imageUrl}" alt="${feature.title} illustration" class="w-full h-auto rounded-lg shadow-xl border border-gray-700"/>
+                        </div>
+
+
+                        <p class="text-lg leading-relaxed text-white">${feature.longDesc}</p>
+
+                        <div class="mt-10 pt-6 border-t border-gray-700">
+                            <h3 class="text-2xl font-bold text-white mb-4">Ready for a deeper dive?</h3>
+                            <p class="text-gray-400 mb-6">Our experts are standing by to show you how this service applies directly to your specific infrastructure.</p>
+                            <button id="book-assessment-btn-details" class="btn-primary px-6 py-3 bg-cyber-gold text-gray-900 font-extrabold rounded-full">
+                                Request a Consultation
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        // --- Booking Form Renderer ---
+        const renderBookingForm = () => {
+             const message = window.globalState.message;
+             let appointmentListHTML = '';
+
+             if (window.globalState.recentAppointments.length > 0) {
+                 appointmentListHTML = `
+                    <h3 class="text-xl font-bold text-white mb-4 mt-8">Your Recent Requests:</h3>
+                    <ul class="space-y-3">
+                        ${window.globalState.recentAppointments.slice(0, 3).map(req => `
+                            <li class="p-3 bg-gray-800 rounded-lg text-sm border-l-4 border-cyber-gold">
+                                <p class="font-semibold">${req.name} (${req.service})</p>
+                                <p class="text-xs text-gray-400">Status: Pending Review</p>
+                            </li>
+                        `).join('')}
+                    </ul>
+                    <p class="text-sm text-gray-500 mt-2">Note: This list is private to your user ID.</p>
+                 `;
+             }
+
+            return `
+                <div class="max-w-2xl mx-auto p-4 md:p-10">
+                    <button class="btn-back flex items-center text-cyber-gold hover:text-white transition duration-200 mb-8 font-semibold">
+                        ${renderIcon('M10 19l-7-7m0 0l7-7m-7 7h18', 'w-5 h-5 mr-2')}
+                        Back to Home
+                    </button>
+
+                    <div class="bg-[#161b22] p-8 rounded-xl border border-gray-700 shadow-2xl">
+                        <h2 class="text-3xl font-extrabold text-white mb-2">Book Your Free Assessment</h2>
+                        <p class="text-gray-400 mb-8">Tell us about your security needs and a specialist will contact you within 24 hours.</p>
+
+                        <div id="app-message" class="${message.text ? '' : 'hidden'}"></div>
+
+                        <form id="appointment-form" class="space-y-6">
+                            <div>
+                                <label for="name" class="block text-sm font-medium text-white mb-1">Full Name</label>
+                                <input type="text" id="name" name="name" required
+                                       class="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg focus:border-cyber-gold focus:ring-1 focus:ring-cyber-gold text-white" />
+                            </div>
+
+                            <div>
+                                <label for="email" class="block text-sm font-medium text-white mb-1">Work Email</label>
+                                <input type="email" id="email" name="email" required
+                                       class="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg focus:border-cyber-gold focus:ring-1 focus:ring-cyber-gold text-white" />
+                            </div>
+
+                            <div>
+                                <label for="service" class="block text-sm font-medium text-white mb-1">Interested Service</label>
+                                <select id="service" name="service" required
+                                        class="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg focus:border-cyber-gold focus:ring-1 focus:ring-cyber-gold text-white">
+                                    <option value="">-- Select a Service --</option>
+                                    <option value="Full Assessment">Full Security Assessment (Recommended)</option>
+                                    ${FEATURES_DATA.map(f => `<option value="${f.title}">${f.title}</option>`).join('')}
+                                    <option value="General Inquiry">General Inquiry</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label for="message" class="block text-sm font-medium text-white mb-1">Your Message/Details</label>
+                                <textarea id="message" name="message" rows="4" required
+                                          class="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg focus:border-cyber-gold focus:ring-1 focus:ring-cyber-gold text-white"
+                                          placeholder="e.g., I need a GDPR compliance audit for my e-commerce platform."></textarea>
+                            </div>
+
+                            <button type="submit" id="submit-booking-btn" class="btn-primary w-full px-4 py-3 bg-cyber-gold text-gray-900 font-extrabold rounded-full text-lg">
+                                Submit Request
+                            </button>
+                        </form>
+
+                        ${appointmentListHTML}
+                    </div>
+                </div>
+            `;
+        };
+
+        // --- Event Listener Attachments ---
+        const attachFeatureCardListeners = () => {
+            document.querySelectorAll('.feature-card').forEach(card => {
+                card.onclick = (e) => {
+                    const featureId = card.getAttribute('data-feature-id');
+                    setView('details', featureId);
+                };
+            });
+        };
+
+        const attachBookingButtonListener = () => {
+            document.getElementById('book-assessment-btn-header').onclick = () => setView('booking');
+            document.getElementById('book-assessment-btn-hero').onclick = () => setView('booking');
+            // This button might be in the details view, so check if it exists before attaching
+            const detailsBtn = document.getElementById('book-assessment-btn-details');
+            if(detailsBtn) {
+                detailsBtn.onclick = () => setView('booking');
+            }
+        };
+
+        const attachFormSubmitListener = () => {
+            const form = document.getElementById('appointment-form');
+            if (form) {
+                form.onsubmit = handleFormSubmission;
+            }
+        };
+
+        // --- Form Submission Handler (Saves to Firestore) ---
+        const handleFormSubmission = async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const submitButton = document.getElementById('submit-booking-btn');
+
+            const name = form.name.value.trim();
+            const email = form.email.value.trim();
+            const service = form.service.value;
+            const message = form.message.value.trim();
+
+            if (!name || !email || !service || !message || !window.db || !window.userId) {
+                window.globalState.message = { text: 'All fields are required. Database connection may be initializing.', type: 'error' };
+                window.renderApp();
+                return;
+            }
+
+            // Disable button and show loading state
+            submitButton.disabled = true;
+            submitButton.textContent = 'Submitting...';
+
+            try {
+                const appointmentData = {
+                    name,
+                    email,
+                    service,
+                    message,
+                    timestamp: new Date().toISOString(),
+                    status: 'New'
+                };
+
+                const path = `/artifacts/${appId}/users/${window.userId}/appointment_requests`;
+                await addDoc(collection(window.db, path), appointmentData);
+
+                window.globalState.message = { text: 'Appointment request submitted successfully! We will contact you shortly.', type: 'success' };
+                form.reset(); // Clear form on success
+            } catch (error) {
+                console.error("Error saving appointment request to Firestore:", error);
+                window.globalState.message = { text: 'Error submitting request. Please try again later.', type: 'error' };
+            } finally {
+                // Re-enable button and clear message after processing
+                submitButton.disabled = false;
+                submitButton.textContent = 'Submit Request';
+                window.renderApp();
+            }
+        };
+
+        // Initial render call when the script loads
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initial render call to draw the UI
+            window.renderApp();
+        });
+    </script>
+</head>
+<body>
+    <!-- App Container will hold the dynamically rendered views (main, booking, details) -->
+    <div id="app-container" class="min-h-screen">
+        <!-- Content will be injected here by renderApp() -->
+    </div>
+</body>
+</html>

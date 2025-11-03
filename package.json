@@ -1,0 +1,13 @@
+{
+  "name": "cyber-shield-consultancy-server",
+  "version": "1.0.0",
+  "description": "Node.js server for Cyber Shield Consultancy EJS template.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ejs": "^3.1.9"
+  }
+}
